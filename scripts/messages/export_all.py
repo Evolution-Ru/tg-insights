@@ -39,8 +39,8 @@ from telethon.tl import functions
 
 def load_account_env(account_name: str) -> None:
     """Load environment variables from account-specific .env file"""
-    current_dir = Path(__file__).resolve().parent  # messages-tools/
-    env_path = current_dir.parent / "data/accounts" / account_name / ".env"  # ../accounts/{account}/.env
+    current_dir = Path(__file__).resolve().parent  # scripts/messages/
+    env_path = current_dir.parent.parent / "data/accounts" / account_name / ".env"  # ../../data/accounts/{account}/.env
     
     if not env_path.exists():
         raise SystemExit(f"Environment file not found: {env_path}")
@@ -642,8 +642,8 @@ def parse_args(argv):
     load_account_env(args.account)
     
     # Set database path
-    current_dir = Path(__file__).resolve().parent  # messages-tools/
-    db_path = current_dir.parent / "data/accounts" / args.account / "messages.sqlite"  # ../accounts/{account}/messages.sqlite
+    current_dir = Path(__file__).resolve().parent  # scripts/messages/
+    db_path = current_dir.parent.parent / "data/accounts" / args.account / "messages.sqlite"  # ../../data/accounts/{account}/messages.sqlite
     
     # Parse date_from
     date_from: Optional[datetime] = None

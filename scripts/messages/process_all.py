@@ -457,8 +457,8 @@ def main() -> None:
     # Определяем путь к БД: либо из --account, либо из --db
     if args.account:
         # Режим --account: формируем путь автоматически
-        current_dir = Path(__file__).resolve().parent  # messages-tools/
-        account_dir = current_dir.parent / "data/accounts" / args.account  # ../accounts/{account}/
+        current_dir = Path(__file__).resolve().parent  # scripts/messages/
+        account_dir = current_dir.parent.parent / "data/accounts" / args.account  # ../../data/accounts/{account}/
         db_path = account_dir / "messages.sqlite"
         
         # Устанавливаем batch_dir для аккаунта (если не указан явно)
