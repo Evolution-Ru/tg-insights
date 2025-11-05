@@ -60,7 +60,7 @@ def screen_context(context: DialogContext) -> ScreeningResult:
     
     # 2. Отправка в batch API (дешево: $0.075/$0.30 per 1M tokens)
     response = openai_batch_request(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"}
     )
@@ -119,7 +119,7 @@ def extract_artifacts(screening: ScreeningResult) -> List[Artifact]:
     
     # 4. Извлечение через модель
     artifacts = openai_extract(
-        model="gpt-4o",
+        model="gpt-5",
         messages=formatted,
         expected_types=screening.types,
         response_format={"type": "json_object"}
@@ -210,7 +210,7 @@ def check_artifact_status(artifact: Artifact) -> StatusCheck:
     
     # 3. Анализ статуса через модель
     status = openai_check_status(
-        model="gpt-4o-mini",
+        model="gpt-5-mini",
         artifact=artifact,
         messages=future_messages
     )

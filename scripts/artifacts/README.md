@@ -20,7 +20,7 @@
 │ Уровень 1: СКРИНИНГ КОНТЕКСТОВ (дешево, массово)       │
 │ ┌─────────────────────────────────────────────────────┐ │
 │ │ Вход: dialog_contexts (~1000 контекстов)            │ │
-│ │ Модель: GPT-4o-mini (batch API)                     │ │
+│ │ Модель: gpt-5-mini (batch API)                     │ │
 │ │ Промпт: "Есть ли артефакты? Да/Нет + типы"         │ │
 │ │ Выход: 20% помечено как "есть артефакты"           │ │
 │ │ Стоимость: ~$0.15 за 1000 контекстов               │ │
@@ -32,7 +32,7 @@
 │ ┌─────────────────────────────────────────────────────┐ │
 │ │ Вход: Исходные сообщения из "подозрительных"       │ │
 │ │       контекстов (50-100 сообщений)                │ │
-│ │ Модель: GPT-4o (batch API)                         │ │
+│ │ Модель: gpt-5 (batch API)                         │ │
 │ │ Промпт: "Извлеки точные формулировки артефактов"   │ │
 │ │ Выход: Структурированные артефакты с метаданными   │ │
 │ │ Стоимость: ~$0.50 за 100 контекстов                │ │
@@ -43,7 +43,7 @@
 │ Уровень 3: ПРОВЕРКА СТАТУСОВ (для артефактов с дедлайнами) │
 │ ┌─────────────────────────────────────────────────────┐ │
 │ │ Вход: Артефакт + сообщения после дедлайна          │ │
-│ │ Модель: GPT-4o-mini                                 │ │
+│ │ Модель: gpt-5-mini                                 │ │
 │ │ Промпт: "Было ли выполнено обязательство?"         │ │
 │ │ Выход: Статус (выполнено/просрочено/в процессе)   │ │
 │ └─────────────────────────────────────────────────────┘ │
@@ -65,7 +65,7 @@ CREATE TABLE artifact_screening (
     
     -- Метаданные
     screened_at TEXT DEFAULT (datetime('now')),
-    model_name TEXT DEFAULT 'gpt-4o-mini',
+    model_name TEXT DEFAULT 'gpt-5-mini',
     
     FOREIGN KEY (context_id) REFERENCES dialog_contexts(id)
 );
@@ -104,7 +104,7 @@ CREATE TABLE artifacts (
     -- Метаданные извлечения
     extracted_at TEXT DEFAULT (datetime('now')),
     confidence REAL,                       -- уверенность модели
-    model_name TEXT DEFAULT 'gpt-4o',
+    model_name TEXT DEFAULT 'gpt-5',
     
     FOREIGN KEY (screening_id) REFERENCES artifact_screening(id),
     FOREIGN KEY (chat_id) REFERENCES messages(chat_id)
@@ -130,7 +130,7 @@ CREATE TABLE artifact_status_checks (
     
     -- Метаданные
     checked_at TEXT DEFAULT (datetime('now')),
-    model_name TEXT DEFAULT 'gpt-4o-mini',
+    model_name TEXT DEFAULT 'gpt-5-mini',
     
     FOREIGN KEY (artifact_id) REFERENCES artifacts(id)
 );
@@ -258,12 +258,12 @@ python scripts/artifacts/check_status.py --account ychukaev --overdue
 ### `config.yaml`
 ```yaml
 screening:
-  model: "gpt-4o-mini"
+  model: "gpt-5-mini"
   batch_size: 1000
   confidence_threshold: 0.7
   
 extraction:
-  model: "gpt-4o"
+  model: "gpt-5"
   window_size: 100  # сообщений
   artifact_types:
     - commitment
@@ -273,7 +273,7 @@ extraction:
     - agreement
     
 status_check:
-  model: "gpt-4o-mini"
+  model: "gpt-5-mini"
   check_window_days: 14  # дней после дедлайна
   auto_check_overdue: true
 ```
