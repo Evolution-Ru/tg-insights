@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Скачивание аудио и видео за последние 6 месяцев (<5 минут).
+Скачивание аудио и видео за последние 6 месяцев без транскрипции (<5 минут).
+Исключает заблокированные чаты из dialog_denied.
 Параллельная загрузка с обработкой Telegram rate limits.
 """
 import asyncio
@@ -179,14 +180,13 @@ async def download_one_file(client, semaphore, conn, idx, total, chat_id, messag
 
 async def main():
     print("🚀 Запуск скрипта (параллельная загрузка)...", flush=True)
-    print("📥 Скачивание медиа за последние 6 месяцев", flush=True)
+    print("📥 Скачивание медиа за последние 6 месяцев без транскрипции", flush=True)
     print("=" * 60, flush=True)
     
     print(f"🔍 Подключение к БД: {db_path}", flush=True)
     conn = sqlite3.connect(str(db_path), timeout=10, check_same_thread=False)
     print("✓ Подключено к БД", flush=True)
     
-    # Выбираем медиа за последние 6 месяцев
     # Загружаем список заблокированных чатов
     denied_ids = set()
     try:
@@ -204,14 +204,23 @@ async def main():
     
     print("📊 Подсчёт медиа...", flush=True)
     
-    rows = conn.execute("""
+    # Формируем SQL запрос с исключением заблокированных чатов
+    query = """
         SELECT chat_id, message_id, json
         FROM messages
         WHERE json LIKE '%"media":%'
           AND date >= date('now', '-6 months')
           AND (media_path IS NULL OR media_path = '')
           AND (transcript IS NULL OR transcript = '')
-    """).fetchall()
+    """
+    
+    # Добавляем исключение заблокированных чатов
+    if denied_ids:
+        placeholders = ','.join('?' * len(denied_ids))
+        query += f" AND chat_id NOT IN ({placeholders})"
+    
+    params = list(denied_ids) if denied_ids else []
+    rows = conn.execute(query, params).fetchall()
     
     print(f"✓ Найдено {len(rows)} медиа-сообщений", flush=True)
     
