@@ -1,0 +1,35 @@
+{
+  "model": "gpt-5",
+  "contexts_tested": 3,
+  "results": [
+    {
+      "context_id": 2484,
+      "has_artifacts": true,
+      "types": [
+        "request"
+      ],
+      "confidence": 0.88,
+      "tokens": 787
+    },
+    {
+      "context_id": 832,
+      "has_artifacts": true,
+      "types": [
+        "request",
+        "deadline"
+      ],
+      "confidence": 0.86,
+      "tokens": 991
+    },
+    {
+      "context_id": 1379,
+      "has_artifacts": true,
+      "types": [
+        "request",
+        "agreement"
+      ],
+      "confidence": 0.86,
+      "tokens": 1329
+    }
+  ]
+}
