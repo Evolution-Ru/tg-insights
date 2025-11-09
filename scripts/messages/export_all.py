@@ -247,8 +247,9 @@ async def update_user_from_telegram(
 
 
 async def sync_chat_names_from_users(conn: sqlite3.Connection) -> int:
-    """Update chat_name, from_name and from_username in messages from users table"""
-    # Update chat_name
+    """Update chat_name, from_name and from_username in messages from users table.
+    Only updates records where the field is NULL or empty."""
+    # Update chat_name (only if NULL or empty)
     result1 = conn.execute("""
         UPDATE messages 
         SET chat_name = (
@@ -260,9 +261,10 @@ async def sync_chat_names_from_users(conn: sqlite3.Connection) -> int:
           WHERE u.id = messages.chat_id
         )
         WHERE chat_id IN (SELECT id FROM users)
+          AND (chat_name IS NULL OR chat_name = '')
     """)
     
-    # Update from_name
+    # Update from_name (only if NULL or empty)
     result2 = conn.execute("""
         UPDATE messages 
         SET from_name = (
@@ -275,9 +277,10 @@ async def sync_chat_names_from_users(conn: sqlite3.Connection) -> int:
         )
         WHERE from_id IS NOT NULL 
           AND from_id IN (SELECT id FROM users)
+          AND (from_name IS NULL OR from_name = '')
     """)
     
-    # Update from_username
+    # Update from_username (only if NULL or empty)
     result3 = conn.execute("""
         UPDATE messages 
         SET from_username = (
@@ -287,6 +290,7 @@ async def sync_chat_names_from_users(conn: sqlite3.Connection) -> int:
         )
         WHERE from_id IS NOT NULL 
           AND from_id IN (SELECT id FROM users)
+          AND (from_username IS NULL OR from_username = '')
     """)
     
     conn.commit()
