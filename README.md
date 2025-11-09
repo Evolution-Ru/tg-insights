@@ -2,6 +2,10 @@
 
 Платформа для автоматической обработки, транскрибации и анализа переписок из Telegram.
 
+> **⚠️ Важно:** Проект использует GPT-5 через `responses.create()` API. См. [GPT5_USAGE.md](GPT5_USAGE.md) для деталей использования.
+
+> **📚 Документация по проекту автоматизации:** См. [../docs/](../docs/) для полной документации по системе автоматизированного помощника.
+
 ## ✨ Возможности
 
 - 📥 **Экспорт сообщений** из Telegram в SQLite базу данных
@@ -66,10 +70,10 @@ nano .env  # или используйте любой редактор
 
 ```bash
 # Создать директорию для вашего аккаунта
-mkdir -p data/accounts/your_account
+mkdir -p accounts/your_account
 
 # Скопировать .env в директорию аккаунта
-cp .env data/accounts/your_account/.env
+cp .env accounts/your_account/.env
 ```
 
 ### 4. Запуск обработки сообщений
@@ -90,32 +94,50 @@ python scripts/media/download.py
 ## 📦 Структура проекта
 
 ```
-tg-insights/
-├── data/                     # 💾 Данные
+tg-analyz/
+├── data/                     # 💾 Данные (игнорируется git)
 │   └── accounts/            # Аккаунты, БД, медиа
 │       └── your_account/
 │           ├── messages.sqlite
 │           ├── media/
 │           └── .env
 ├── scripts/                  # 🔧 Скрипты
-│   ├── messages/            # Экспорт и обработка сообщений
-│   │   ├── export_all.py   # Экспорт из Telegram
-│   │   ├── process_all.py  # Обработка и суммаризация
-│   │   ├── send.py         # Отправка сообщений
-│   │   └── summarizer/     # Batch суммаризация
-│   ├── media/              # Скачивание медиа
-│   │   └── download.py     # Скачивание аудио/видео
-│   └── stt/                # Транскрибация
-│       ├── stt.tbank.py    # T-bank STT
-│       └── TbankClient.py  # T-bank API клиент
-├── logs/                     # 📝 Все логи
-│   ├── process_loop.log
-│   ├── launchd.log
-│   └── launchd.error.log
-├── .venv/                    # Virtual environment (скрытая)
-├── requirements.txt          # Зависимости
-└── README.md                 # Этот файл
+│   ├── analysis/            # 📊 Модульный анализ переписок (НОВОЕ!)
+│   │   ├── analyze_farma.py # Главный скрипт анализа
+│   │   ├── utils/          # Утилиты (db, formatting, gpt5_client)
+│   │   ├── compression/    # Сжатие диалогов (chunking, batch, sliding window)
+│   │   ├── embeddings/     # Эмбеддинги и drill-down
+│   │   └── extraction/     # Извлечение задач и проектов
+│   ├── batch/              # Утилиты для Batch API
+│   │   ├── check.py        # Проверка статусов батчей
+│   │   ├── download.py    # Скачивание результатов
+│   │   ├── process.py     # Обработка результатов
+│   │   └── test_single.py # Тестирование одного запроса
+│   ├── messages/           # Экспорт и обработка сообщений
+│   │   ├── export_all.py  # Экспорт из Telegram
+│   │   ├── process_all.py # Обработка и суммаризация
+│   │   ├── send.py        # Отправка сообщений
+│   │   └── summarizer/    # Batch суммаризация
+│   ├── media/             # Скачивание медиа
+│   │   └── download.py    # Скачивание аудио/видео
+│   └── stt/               # Транскрибация
+│       ├── stt.tbank.py   # T-bank STT
+│       └── TbankClient.py # T-bank API клиент
+├── results/                # 📊 Результаты работы (игнорируется git)
+│   └── farma/             # Результаты анализа Фарма+
+│       ├── compressed_parts/ # Сжатые части диалога
+│       ├── embeddings/      # Эмбеддинги
+│       ├── extracted/       # Извлеченные задачи/проекты
+│       └── threads/         # Исходные и сжатые потоки
+├── logs/                    # 📝 Все логи (игнорируется git)
+├── .venv/                   # Virtual environment (игнорируется git)
+├── requirements.txt         # Зависимости
+├── GPT5_USAGE.md           # Руководство по GPT-5
+├── REFACTORING_PLAN.md     # План рефакторинга
+└── README.md                # Этот файл
 ```
+
+> **📚 Подробнее о модульной структуре анализа:** См. [scripts/analysis/README.md](scripts/analysis/README.md)
 
 ---
 
@@ -139,8 +161,8 @@ python scripts/stt/stt.tbank.py --account your_account --check-only
 
 # Указать пути вручную (вместо --account)
 python scripts/stt/stt.tbank.py \
-  --db data/accounts/your_account/messages.sqlite \
-  --media-dir data/accounts/your_account/media \
+  --db accounts/your_account/messages.sqlite \
+  --media-dir accounts/your_account/media \
   --limit 100
 ```
 
@@ -163,7 +185,7 @@ python scripts/stt/stt.tbank.py \
 
 ```bash
 python scripts/stt/stt.whisper.py \
-  --db data/accounts/your_account/messages.sqlite \
+  --db accounts/your_account/messages.sqlite \
   --limit 100
 ```
 
@@ -178,7 +200,7 @@ python scripts/stt/stt.whisper.py \
 
 ### Настройка API ключей
 
-В `data/accounts/your_account/.env`:
+В `accounts/your_account/.env`:
 ```bash
 # T-банк STT
 TBANK_API_KEY=your_key
@@ -206,8 +228,32 @@ python scripts/messages/process_all.py \
   --max-dialogs 10000
 ```
 
+### Анализ переписок и извлечение задач
+
+**Новый модульный скрипт** для анализа конкретных чатов и извлечения задач:
+
+```bash
+# Анализ переписок с Фарма+ и извлечение задач
+python -m scripts.analysis.analyze_farma
+```
+
+**Что делает:**
+1. Собирает сообщения из указанных чатов
+2. Форматирует в единый поток с группировкой по дням
+3. Сжимает диалог через GPT-5 (с инкрементальной обработкой)
+4. Извлекает задачи и проекты
+5. Группирует и дедуплицирует задачи через эмбеддинги
+6. Сохраняет результаты в `results/farma/`
+
+**Результаты:**
+- `results/farma/extracted/farma_tasks_extracted.json` - извлеченные задачи
+- `results/farma/extracted/farma_projects_extracted.json` - извлеченные проекты
+- `results/farma/threads/farma_thread_compressed.txt` - сжатый диалог
+
+> **📚 Подробнее:** См. [scripts/analysis/README.md](scripts/analysis/README.md) для детальной документации по модульной структуре.
+
 **Параметры:**
-- `--account` - имя аккаунта (папка в data/accounts/)
+- `--account` - имя аккаунта (папка в accounts/)
 - `--use-batch` - использовать batch API OpenAI (дешевле)
 - `--max-dialogs` - макс. диалогов для обработки
 - `--limit` - лимит сообщений
@@ -247,7 +293,7 @@ python scripts/media/download.py
 3. Проверяет длительность через Telegram API **БЕЗ скачивания**
 4. Пропускает файлы >5 минут
 5. **Скачивает 20 файлов параллельно** с обработкой FloodWait
-6. Сохраняет в `data/accounts/{account}/media/`
+6. Сохраняет в `accounts/{account}/media/`
 7. Обновляет `media_path` в БД
 
 **Особенности:**
@@ -258,7 +304,7 @@ python scripts/media/download.py
 
 **Скачанные файлы:**
 ```
-data/accounts/your_account/media/
+accounts/your_account/media/
 ├── {chat_id}_{message_id}.oga  # Аудио
 ├── {chat_id}_{message_id}.mp4  # Видео
 └── {chat_id}_{message_id}.wav  # Конвертированные для STT
@@ -305,7 +351,7 @@ tail -f logs/launchd.error.log
 
 ## 📊 База данных
 
-SQLite база находится в `data/accounts/{account}/messages.sqlite`
+SQLite база находится в `accounts/{account}/messages.sqlite`
 
 ### Основные таблицы
 
@@ -336,17 +382,17 @@ users (
 
 ```bash
 # Статистика по сообщениям
-sqlite3 data/accounts/your_account/messages.sqlite \
+sqlite3 accounts/your_account/messages.sqlite \
   "SELECT COUNT(*) FROM messages"
 
 # Непротранскрибированные медиа
-sqlite3 data/accounts/your_account/messages.sqlite \
+sqlite3 accounts/your_account/messages.sqlite \
   "SELECT COUNT(*) FROM messages 
    WHERE media_path IS NOT NULL 
    AND transcript IS NULL"
 
 # Размер БД
-du -h data/accounts/your_account/messages.sqlite
+du -h accounts/your_account/messages.sqlite
 ```
 
 ---
@@ -364,15 +410,15 @@ pip install -r requirements.txt
 
 ```bash
 # Проверить что .env существует
-ls -la data/accounts/your_account/.env
+ls -la accounts/your_account/.env
 
 # Создать из примера
-cp data/accounts/your_account/.env.example data/accounts/your_account/.env
+cp accounts/your_account/.env.example accounts/your_account/.env
 ```
 
 ### Ошибка: "OPENAI_API_KEY not set"
 
-Добавить в `data/accounts/your_account/.env`:
+Добавить в `accounts/your_account/.env`:
 ```bash
 OPENAI_API_KEY=sk-...
 ```
@@ -385,10 +431,10 @@ OPENAI_API_KEY=sk-...
 ```bash
 # Остановить (Ctrl+C)
 # Проверить количество файлов
-ls data/accounts/your_account/media/ | wc -l
+ls accounts/your_account/media/ | wc -l
 
 # Проверить записи в БД
-sqlite3 data/accounts/your_account/messages.sqlite \
+sqlite3 accounts/your_account/messages.sqlite \
   "SELECT COUNT(*) FROM messages WHERE media_path IS NOT NULL"
 ```
 
@@ -462,7 +508,7 @@ python scripts/messages/process_all.py \
 
 # Тест STT (5 файлов)
 python scripts/stt/stt.tbank.py \
-  --db data/accounts/your_account/messages.sqlite \
+  --db accounts/your_account/messages.sqlite \
   --limit 5
 ```
 
@@ -470,7 +516,7 @@ python scripts/stt/stt.tbank.py \
 
 ## 🔐 API ключи
 
-Все ключи хранятся в `data/accounts/{account}/.env`:
+Все ключи хранятся в `accounts/{account}/.env`:
 
 ```bash
 # Telegram
