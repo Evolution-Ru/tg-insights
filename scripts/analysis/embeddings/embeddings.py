@@ -66,37 +66,76 @@ def save_embeddings_for_level(
     items: List[Dict[str, Any]], 
     output_dir: Path,
     client=None,
-    cache_hours: float = 3.0
+    cache_hours: Optional[float] = None
 ):
     """
     Сохраняет эмбеддинги для элементов определенного уровня.
-    Использует кеш, если файл существует и создан менее cache_hours часов назад.
+    Инкрементально дополняет существующие эмбеддинги новыми элементами.
+    Создает эмбеддинги только для новых элементов, которых еще нет в файле.
     
     Args:
         level: 'raw_messages', 'compressed_chunks', 'summaries', 'tasks', 'projects'
         items: список словарей с полями 'text', 'id', 'metadata' и т.д.
         output_dir: Директория для сохранения эмбеддингов
         client: OpenAI клиент (если None, создается новый)
-        cache_hours: Максимальное время хранения кеша в часах (по умолчанию 3 часа)
+        cache_hours: Максимальное время хранения кеша в часах (None = без ограничений)
+                     Если указано и файл старше - пересоздается полностью
     """
     if client is None:
         client = get_openai_client()
     
     embeddings_file = output_dir / f"embeddings_{level}.json"
     
-    # Проверяем кеш: если файл существует и создан менее cache_hours часов назад - используем его
+    # Загружаем существующие эмбеддинги
+    existing_embeddings = {}
     if embeddings_file.exists():
-        file_age_hours = (time.time() - embeddings_file.stat().st_mtime) / 3600
-        if file_age_hours < cache_hours:
-            print(f"   ✅ Используем кеш эмбеддингов для уровня '{level}' (возраст: {file_age_hours:.1f} часов)")
-            print(f"   💾 Файл: {embeddings_file}")
-            return
+        # Проверяем возраст файла, если указан cache_hours
+        if cache_hours is not None:
+            file_age_hours = (time.time() - embeddings_file.stat().st_mtime) / 3600
+            if file_age_hours < cache_hours:
+                print(f"   ✅ Используем кеш эмбеддингов для уровня '{level}' (возраст: {file_age_hours:.1f} часов)")
+                print(f"   💾 Файл: {embeddings_file}")
+                return
+            else:
+                print(f"   ⚠ Файл эмбеддингов устарел ({file_age_hours:.1f} часов), пересоздаем...")
+        else:
+            # Загружаем существующие для инкрементального обновления
+            try:
+                with open(embeddings_file, "r", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+                    # Создаем словарь {id: embedding_data} для быстрого поиска
+                    for emb in existing_data:
+                        emb_id = emb.get('id')
+                        if emb_id is not None:
+                            existing_embeddings[emb_id] = emb
+                print(f"   📂 Загружено {len(existing_embeddings)} существующих эмбеддингов")
+            except Exception as e:
+                print(f"   ⚠ Ошибка при загрузке существующих эмбеддингов: {e}")
+                existing_embeddings = {}
     
-    embeddings_data = []
+    # Определяем, какие элементы нужно обработать (новые или обновленные)
+    items_to_process = []
+    for item in items:
+        item_id = item.get('id')
+        text = item.get('text', '')
+        if not text:
+            continue
+        
+        # Проверяем, есть ли уже эмбеддинг для этого элемента
+        if item_id is not None and item_id in existing_embeddings:
+            # Элемент уже есть, пропускаем (или можно проверить, изменился ли текст)
+            continue
+        
+        items_to_process.append(item)
     
-    print(f"   📊 Сохранение эмбеддингов для уровня '{level}' ({len(items)} элементов)...")
+    if not items_to_process:
+        print(f"   ✅ Все эмбеддинги для уровня '{level}' уже существуют ({len(items)} элементов)")
+        return
     
-    for i, item in enumerate(items, 1):
+    print(f"   📊 Создание эмбеддингов для {len(items_to_process)} новых элементов (из {len(items)} всего)...")
+    
+    new_embeddings_data = []
+    for i, item in enumerate(items_to_process, 1):
         text = item.get('text', '')
         if not text:
             continue
@@ -104,22 +143,25 @@ def save_embeddings_for_level(
         # Получаем эмбеддинг
         embedding = get_embedding(text, client=client)
         if embedding:
-            embeddings_data.append({
-                'id': item.get('id', i),
+            new_embeddings_data.append({
+                'id': item.get('id', len(existing_embeddings) + i),
                 'text': text[:500],  # Сохраняем только начало для справки
                 'embedding': embedding,
                 'metadata': item.get('metadata', {})
             })
             if i % 10 == 0:
-                print(f"      Обработано {i}/{len(items)}...", end='\r', flush=True)
+                print(f"      Обработано {i}/{len(items_to_process)}...", end='\r', flush=True)
     
-    print(f"      ✓ Сохранено {len(embeddings_data)} эмбеддингов")
+    print(f"      ✓ Создано {len(new_embeddings_data)} новых эмбеддингов")
     
-    # Сохраняем в файл
-    if embeddings_data:
+    # Объединяем существующие и новые эмбеддинги
+    all_embeddings = list(existing_embeddings.values()) + new_embeddings_data
+    
+    # Сохраняем обновленный файл
+    if all_embeddings:
         with open(embeddings_file, "w", encoding="utf-8") as f:
-            json.dump(embeddings_data, f, ensure_ascii=False, indent=2)
-        print(f"   💾 Эмбеддинги сохранены: {embeddings_file}")
+            json.dump(all_embeddings, f, ensure_ascii=False, indent=2)
+        print(f"   💾 Эмбеддинги сохранены: {embeddings_file} ({len(all_embeddings)} всего, +{len(new_embeddings_data)} новых)")
 
 
 def find_relevant_sources_by_embedding(
