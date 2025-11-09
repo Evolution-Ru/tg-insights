@@ -5,9 +5,63 @@ import json
 import time
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from ..utils.gpt5_client import get_openai_client
 from ..utils.response_parser import parse_gpt5_response
+
+
+def check_active_batches(metadata_file: Path, client=None) -> List[Dict]:
+    """
+    Проверяет наличие активных батчей (validating, in_progress).
+    Возвращает список активных батчей.
+    
+    Args:
+        metadata_file: Путь к файлу с метаданными батчей
+        client: OpenAI клиент (если None, создается новый)
+    
+    Returns:
+        Список словарей с информацией об активных батчах
+    """
+    if client is None:
+        client = get_openai_client()
+    
+    active_batches = []
+    
+    if not metadata_file.exists():
+        return active_batches
+    
+    try:
+        with open(metadata_file, "r", encoding="utf-8") as f:
+            batch_metadata_list = json.load(f)
+        
+        # Проверяем последние 10 батчей (чтобы не проверять все старые)
+        recent_batches = batch_metadata_list[-10:] if len(batch_metadata_list) > 10 else batch_metadata_list
+        
+        for batch_meta in recent_batches:
+            batch_id = batch_meta.get("batch_id")
+            if not batch_id:
+                continue
+            
+            try:
+                batch_status = client.batches.retrieve(batch_id)
+                status = batch_status.status
+                
+                if status in ["validating", "in_progress"]:
+                    active_batches.append({
+                        "batch_id": batch_id,
+                        "status": status,
+                        "created_at": batch_meta.get("created_at_iso", "unknown"),
+                        "total_chunks": batch_meta.get("total_chunks", 0)
+                    })
+            except Exception as e:
+                # Батч может быть удален или недоступен - пропускаем
+                continue
+                
+    except Exception as e:
+        # Если не удалось прочитать файл - продолжаем без проверки
+        pass
+    
+    return active_batches
 
 
 def process_chunks_via_batch(
@@ -30,6 +84,16 @@ def process_chunks_via_batch(
     """
     if client is None:
         client = get_openai_client()
+    
+    # Проверяем наличие активных батчей перед созданием нового
+    metadata_file = cache_dir.parent / "batch_metadata.json"
+    active_batches = check_active_batches(metadata_file, client)
+    
+    if active_batches:
+        print(f"\n      ⚠️  Обнаружено {len(active_batches)} активных батчей:")
+        for ab in active_batches:
+            print(f"         - {ab['batch_id']}: {ab['status']} ({ab['total_chunks']} частей, создан {ab['created_at']})")
+        print(f"      💡 Создаю новый батч, но рекомендуется дождаться завершения активных.\n")
     
     print(f"      📝 Создание JSONL файла для батча...")
     
@@ -123,7 +187,7 @@ def process_chunks_via_batch(
         "input_file_id": uploaded_file.id
     }
     
-    metadata_file = cache_dir.parent / "batch_metadata.json"
+    # metadata_file уже определен выше при проверке активных батчей
     batch_metadata_list = []
     if metadata_file.exists():
         with open(metadata_file, "r", encoding="utf-8") as f:
