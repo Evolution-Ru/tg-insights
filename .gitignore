@@ -79,3 +79,4 @@ scripts/analyze_farma_tasks.py
 # Оперативные файлы (не коммитятся)
 GPT5_USAGE.md
 test_gpt5.py
+scripts/analysis/sync/PROJECT_REPORT.md
