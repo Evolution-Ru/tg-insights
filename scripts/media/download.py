@@ -16,14 +16,14 @@ from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError
 
 # Загружаем .env
-load_dotenv(Path("data/accounts/ychukaev/.env"))
+load_dotenv(Path("accounts/ychukaev/.env"))
 
 api_id = os.getenv("TELEGRAM_API_ID")
 api_hash = os.getenv("TELEGRAM_API_HASH")
 session_string = os.getenv("TELEGRAM_SESSION_STRING")
 
-db_path = Path("data/accounts/ychukaev/messages.sqlite")
-media_dir = Path("data/accounts/ychukaev/media")
+db_path = Path("accounts/ychukaev/messages.sqlite")
+media_dir = Path("accounts/ychukaev/media")
 
 media_dir.mkdir(parents=True, exist_ok=True)
 

@@ -17,7 +17,7 @@ async def get_user_info(user_ids: list[int]):
     
     # Load env
     script_dir = Path(__file__).resolve().parent  # messages-tools/
-    account_dir = script_dir.parent / "data/accounts" / "ychukaev"
+    account_dir = script_dir.parent / "accounts" / "ychukaev"
     env_path = account_dir / ".env"
     load_dotenv(env_path)
     

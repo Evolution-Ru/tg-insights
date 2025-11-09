@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, utils
 from telethon.sessions import StringSession
 
-# from data/accounts/ychukaev/.env
-load_dotenv('data/accounts/ychukaev/.env') 
+# from accounts/ychukaev/.env
+load_dotenv('accounts/ychukaev/.env') 
 
 api_id = os.getenv("TELEGRAM_API_ID")
 api_hash = os.getenv("TELEGRAM_API_HASH")

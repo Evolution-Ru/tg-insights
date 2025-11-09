@@ -458,7 +458,7 @@ def main() -> None:
     if args.account:
         # Режим --account: формируем путь автоматически
         current_dir = Path(__file__).resolve().parent  # scripts/messages/
-        account_dir = current_dir.parent.parent / "data/accounts" / args.account  # ../../data/accounts/{account}/
+        account_dir = current_dir.parent.parent / "accounts" / args.account  # ../../accounts/{account}/
         db_path = account_dir / "messages.sqlite"
         
         # Устанавливаем batch_dir для аккаунта (если не указан явно)
@@ -479,7 +479,7 @@ def main() -> None:
         db_path = Path(args.db).expanduser().resolve()
         
         # Пробуем загрузить .env из той же папки что и БД
-        if "data/accounts" in db_path.parts:
+        if "accounts" in db_path.parts:
             account_dir = db_path.parent
             env_in_account = account_dir / ".env"
             if env_in_account.exists():

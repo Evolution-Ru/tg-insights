@@ -17,7 +17,7 @@ from openai import OpenAI
 def load_account_env(account_name: str) -> None:
     """Load environment from account .env"""
     current_dir = Path(__file__).resolve().parent
-    env_path = current_dir.parent.parent / "data/accounts" / account_name / ".env"
+    env_path = current_dir.parent.parent / "accounts" / account_name / ".env"
     
     if not env_path.exists():
         raise SystemExit(f"Environment file not found: {env_path}")
@@ -250,7 +250,7 @@ def main():
     
     # Database path
     current_dir = Path(__file__).resolve().parent
-    db_path = current_dir.parent.parent / "data/accounts" / args.account / "messages.sqlite"
+    db_path = current_dir.parent.parent / "accounts" / args.account / "messages.sqlite"
     
     if not db_path.exists():
         raise SystemExit(f"Database not found: {db_path}")

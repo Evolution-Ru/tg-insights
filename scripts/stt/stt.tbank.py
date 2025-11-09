@@ -631,8 +631,8 @@ async def main(argv: List[str]) -> None:
     # Определяем пути на основе аккаунта или напрямую
     if args.account:
         project_root = Path(__file__).parent.parent.parent
-        args.db = str(project_root / "data" / "accounts" / args.account / "messages.sqlite")
-        args.media_dir = str(project_root / "data" / "accounts" / args.account / "media")
+        args.db = str(project_root / "accounts" / args.account / "messages.sqlite")
+        args.media_dir = str(project_root / "accounts" / args.account / "media")
     elif not args.db or not args.media_dir:
         parser.error("Укажите либо --account, либо оба параметра --db и --media-dir")
 
@@ -641,7 +641,7 @@ async def main(argv: List[str]) -> None:
     account_name = args.account if args.account else "ychukaev"
     
     env_paths = [
-        Path(__file__).parent.parent.parent / "data" / "accounts" / account_name / ".env",
+        Path(__file__).parent.parent.parent / "accounts" / account_name / ".env",
         Path.cwd() / ".env",
         Path(__file__).parent / ".env",
     ]
