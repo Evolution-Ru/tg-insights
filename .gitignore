@@ -75,3 +75,8 @@ scripts/download_batch_results.py
 scripts/process_batch_results.py
 scripts/test_batch_single.py
 scripts/analyze_farma_tasks.py
+
+# Оперативные файлы (не коммитятся)
+CHAT_SUMMARY.md
+REFACTORING.md
+TESTING.md
