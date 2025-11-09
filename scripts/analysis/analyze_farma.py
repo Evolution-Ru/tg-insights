@@ -5,20 +5,27 @@
 """
 import sqlite3
 import json
+import sys
 from pathlib import Path
 from typing import Dict
 
 # Импорты из модулей
-from .utils.db import get_db_connection, get_all_messages_from_chats
-from .utils.formatting import format_messages_as_thread
-from .compression import compress_thread_with_smart_model
-from .embeddings import save_embeddings_for_level
-from .extraction import (
+# Добавляем корень проекта в путь для импортов
+_script_dir = Path(__file__).resolve().parent
+_project_root = _script_dir.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from scripts.analysis.utils.db import get_db_connection, get_all_messages_from_chats
+from scripts.analysis.utils.formatting import format_messages_as_thread
+from scripts.analysis.compression import compress_thread_with_smart_model
+from scripts.analysis.embeddings import save_embeddings_for_level
+from scripts.analysis.extraction import (
     extract_tasks_from_compressed_thread,
     extract_projects_with_drilldown,
     group_and_deduplicate_tasks
 )
-from .utils.gpt5_client import get_openai_client
+from scripts.analysis.utils.gpt5_client import get_openai_client
 
 
 # Конфигурация
