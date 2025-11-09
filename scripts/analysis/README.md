@@ -328,8 +328,5 @@ cat results/farma/extracted/farma_tasks_extracted.json
 - 📊 Статистика
 
 ## 📚 Связанная документация
-
-- [GPT-5 Usage Guide](../GPT5_USAGE.md) - использование GPT-5 API
-- [Refactoring Plan](../REFACTORING_PLAN.md) - план рефакторинга
 - [Main README](../README.md) - общая документация проекта
 
