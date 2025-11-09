@@ -15,7 +15,7 @@ def get_openai_client(timeout: float = 600.0) -> OpenAI:
     """
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent.parent.parent  # tg-analyz/
-    account_env_path = project_root / "data" / "accounts" / "ychukaev" / ".env"
+    account_env_path = project_root / "accounts" / "ychukaev" / ".env"
     
     if account_env_path.exists():
         load_dotenv(account_env_path, override=True)

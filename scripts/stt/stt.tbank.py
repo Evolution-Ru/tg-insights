@@ -9,9 +9,11 @@
 - Асинхронная обработка
 
 Использование:
-  python transcribe_media_tbank.py \
-    --db ../data/accounts/your_account/messages.sqlite \
-    --media-dir ../data/accounts/your_account/media
+  python stt.tbank.py \
+    --account your_account \
+    # или напрямую:
+    --db accounts/your_account/messages.sqlite \
+    --media-dir accounts/your_account/media
 
 Требуется в .env:
 - TBANK_API_KEY
