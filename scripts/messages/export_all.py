@@ -594,7 +594,8 @@ async def export_all_dialogs(
         # Final sync of chat names from updated users table
         print("\n🔄 Синхронизирую имена чатов и отправителей из таблицы users...")
         updated_rows = await sync_chat_names_from_users(conn)
-        print(f"✅ Обновлено {updated_rows} строк в messages.")
+        if updated_rows > 0:
+            print(f"✅ Обновлено имен в {updated_rows} сообщениях (синхронизация с таблицей users).")
         
     conn.close()
     print(f"\n🎉 Экспорт завершён!")
