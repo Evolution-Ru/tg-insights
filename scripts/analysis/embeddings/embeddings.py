@@ -2,6 +2,7 @@
 Работа с эмбеддингами для семантического поиска
 """
 import json
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from ..utils.gpt5_client import get_openai_client
@@ -64,21 +65,33 @@ def save_embeddings_for_level(
     level: str, 
     items: List[Dict[str, Any]], 
     output_dir: Path,
-    client=None
+    client=None,
+    cache_hours: float = 3.0
 ):
     """
     Сохраняет эмбеддинги для элементов определенного уровня.
+    Использует кеш, если файл существует и создан менее cache_hours часов назад.
     
     Args:
         level: 'raw_messages', 'compressed_chunks', 'summaries', 'tasks', 'projects'
         items: список словарей с полями 'text', 'id', 'metadata' и т.д.
         output_dir: Директория для сохранения эмбеддингов
         client: OpenAI клиент (если None, создается новый)
+        cache_hours: Максимальное время хранения кеша в часах (по умолчанию 3 часа)
     """
     if client is None:
         client = get_openai_client()
     
     embeddings_file = output_dir / f"embeddings_{level}.json"
+    
+    # Проверяем кеш: если файл существует и создан менее cache_hours часов назад - используем его
+    if embeddings_file.exists():
+        file_age_hours = (time.time() - embeddings_file.stat().st_mtime) / 3600
+        if file_age_hours < cache_hours:
+            print(f"   ✅ Используем кеш эмбеддингов для уровня '{level}' (возраст: {file_age_hours:.1f} часов)")
+            print(f"   💾 Файл: {embeddings_file}")
+            return
+    
     embeddings_data = []
     
     print(f"   📊 Сохранение эмбеддингов для уровня '{level}' ({len(items)} элементов)...")

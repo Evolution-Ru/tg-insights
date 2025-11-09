@@ -11,7 +11,7 @@ from openai import OpenAI
 # Загружаем .env
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent.parent  # tg-analyz/
-account_env_path = project_root / "data" / "accounts" / "ychukaev" / ".env"
+account_env_path = project_root / "accounts" / "ychukaev" / ".env"
 
 if account_env_path.exists():
     load_dotenv(account_env_path, override=True)

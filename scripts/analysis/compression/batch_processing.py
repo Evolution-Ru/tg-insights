@@ -64,6 +64,68 @@ def check_active_batches(metadata_file: Path, client=None) -> List[Dict]:
     return active_batches
 
 
+def check_duplicate_batches(metadata_file: Path, chunk_hashes: List[str], client=None) -> Optional[Dict]:
+    """
+    Проверяет наличие батчей с теми же хешами чанков (дубликаты).
+    Возвращает информацию о найденном дубликате или None.
+    
+    Args:
+        metadata_file: Путь к файлу с метаданными батчей
+        chunk_hashes: Список хешей чанков для проверки
+        client: OpenAI клиент (если None, создается новый)
+    
+    Returns:
+        Словарь с информацией о дубликате или None
+    """
+    if client is None:
+        client = get_openai_client()
+    
+    if not metadata_file.exists():
+        return None
+    
+    try:
+        with open(metadata_file, "r", encoding="utf-8") as f:
+            batch_metadata_list = json.load(f)
+        
+        # Проверяем последние 10 батчей
+        recent_batches = batch_metadata_list[-10:] if len(batch_metadata_list) > 10 else batch_metadata_list
+        
+        # Создаем множество хешей для быстрого сравнения
+        new_hashes_set = set(chunk_hashes)
+        
+        for batch_meta in reversed(recent_batches):  # Проверяем с конца (новые сначала)
+            batch_id = batch_meta.get("batch_id")
+            if not batch_id:
+                continue
+            
+            # Получаем хеши из метаданных батча
+            batch_chunks = batch_meta.get("chunks", [])
+            batch_hashes = [chunk.get("chunk_hash") for chunk in batch_chunks if chunk.get("chunk_hash")]
+            
+            # Проверяем, совпадают ли хеши
+            if set(batch_hashes) == new_hashes_set:
+                # Проверяем статус батча через API
+                try:
+                    batch_status = client.batches.retrieve(batch_id)
+                    status = batch_status.status
+                    
+                    return {
+                        "batch_id": batch_id,
+                        "status": status,
+                        "created_at": batch_meta.get("created_at_iso", "unknown"),
+                        "total_chunks": len(batch_hashes)
+                    }
+                except Exception:
+                    # Батч может быть удален - пропускаем
+                    continue
+                    
+    except Exception as e:
+        # Если не удалось прочитать файл - продолжаем без проверки
+        pass
+    
+    return None
+
+
 def process_chunks_via_batch(
     chunks_to_process: List[Tuple[int, str, str]], 
     cache_dir: Path,
@@ -85,10 +147,28 @@ def process_chunks_via_batch(
     if client is None:
         client = get_openai_client()
     
-    # Проверяем наличие активных батчей перед созданием нового
+    # Проверяем наличие активных батчей и дубликатов перед созданием нового
     metadata_file = cache_dir.parent / "batch_metadata.json"
-    active_batches = check_active_batches(metadata_file, client)
     
+    # Извлекаем хеши чанков для проверки дубликатов
+    chunk_hashes = [chunk_hash for _, _, chunk_hash in chunks_to_process]
+    
+    # Проверяем дубликаты по хешам
+    duplicate = check_duplicate_batches(metadata_file, chunk_hashes, client)
+    if duplicate:
+        if duplicate["status"] == "completed":
+            print(f"\n      ✅ Найден завершенный батч-дубликат: {duplicate['batch_id']}")
+            print(f"      💡 Используем результаты существующего батча вместо создания нового.\n")
+            # Возвращаем пустой словарь - результаты будут обработаны из существующего батча
+            return {}
+        else:
+            print(f"\n      ⚠️  Найден активный батч-дубликат: {duplicate['batch_id']} ({duplicate['status']})")
+            print(f"      💡 Дожидаемся завершения существующего батча вместо создания нового.\n")
+            # Возвращаем пустой словарь - дожидаемся завершения существующего батча
+            return {}
+    
+    # Проверяем активные батчи (для предупреждения)
+    active_batches = check_active_batches(metadata_file, client)
     if active_batches:
         print(f"\n      ⚠️  Обнаружено {len(active_batches)} активных батчей:")
         for ab in active_batches:
