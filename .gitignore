@@ -7,50 +7,27 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-*.pyc
-
-# Virtual Environment
 .venv/
 venv/
-env/
 ENV/
+*.pyc
+*.pyo
+*.pyd
 
-# Data
-accounts/
-*.sqlite
-*.sqlite-shm
-*.sqlite-wal
-*.session
+# Accounts (sensitive data)
+accounts/*/.env
+accounts/*/messages.sqlite*
+accounts/*/messages.sqlite-shm
+accounts/*/messages.sqlite-wal
+accounts/*/session_*.session
+accounts/*/media/
+accounts/*/.batches/
 
-# Results and cache (все результаты работы скриптов)
+# Results and cache
 results/
-farma_compressed_parts/
-*.cache
 cache/
-
-# Batch processing results
-batch_*.json
-batch_metadata.json
-
-# Config (user-specific)
-config/
-local/
-
-# Logs
-logs/
 *.log
-
-# Media files
-*.oga
-*.mp4
-*.mp3
-*.wav
-*.webm
-
-# Environment variables
-.env
-*.env
-!.env.example
+logs/
 
 # IDE
 .vscode/
@@ -58,25 +35,19 @@ logs/
 *.swp
 *.swo
 *~
+.cursor/
 
 # OS
 .DS_Store
 Thumbs.db
 
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+test_imports.py
+
 # Temporary files
 *.tmp
-*.temp
-test_*.json
-test_*.txt
-
-# Old scripts (deprecated - уже перенесены в scripts/batch/)
-scripts/check_batches.py
-scripts/download_batch_results.py
-scripts/process_batch_results.py
-scripts/test_batch_single.py
-scripts/analyze_farma_tasks.py
-
-# Оперативные файлы (не коммитятся)
-GPT5_USAGE.md
-test_gpt5.py
-scripts/analysis/sync/PROJECT_REPORT.md
+*.bak
+*.swp
