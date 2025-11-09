@@ -79,4 +79,5 @@ scripts/analyze_farma_tasks.py
 # Оперативные файлы (не коммитятся)
 CHAT_SUMMARY.md
 REFACTORING.md
+GPT5_USAGE.md
 TESTING.md
