@@ -10,15 +10,15 @@ from typing import Dict, List, Any, Optional
 
 # Добавляем корень проекта в путь
 _script_dir = Path(__file__).resolve().parent
-_project_root = _script_dir.parent.parent.parent
+_project_root = _script_dir.parent.parent.parent.parent  # scripts -> sync -> analysis -> scripts -> tg-analyz
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from scripts.analysis.sync.asana_sync import AsanaSync
+from scripts.analysis.sync.core.asana_sync import AsanaSync
 
 # Импортируем простой клиент для прямых вызовов MCP
 try:
-    from scripts.analysis.sync.direct_mcp import create_direct_mcp_client
+    from scripts.analysis.sync.api.direct_mcp import create_direct_mcp_client
 except ImportError:
     create_direct_mcp_client = None
 
@@ -28,15 +28,57 @@ ASANA_PROJECT_GID = "1210655252186716"  # Фарма+
 ASANA_WORKSPACE_GID = "624391999090674"
 
 
-def load_asana_tasks_via_mcp(mcp_client) -> List[Dict[str, Any]]:
+def load_stories_for_task(mcp_client, task_gid: str) -> List[str]:
+    """
+    Загрузить комментарии (stories) для задачи Asana
+    
+    Args:
+        mcp_client: MCP клиент для работы с Asana
+        task_gid: GID задачи
+        
+    Returns:
+        Список текстов комментариев
+    """
+    try:
+        result = mcp_client.call_tool(
+            "mcp_mcp-config-el8wcq_ASANA_GET_STORIES_FOR_TASK",
+            {
+                "task_gid": task_gid,
+                "opt_fields": ["text", "created_at", "created_by.name"]
+            }
+        )
+        
+        successful = result.get('successful') or result.get('successfull', False)
+        if result and successful:
+            stories = result.get('data', {}).get('data', [])
+            # Извлекаем только текстовые комментарии (не системные события)
+            comments = []
+            for story in stories:
+                text = story.get('text', '').strip()
+                if text:  # Только текстовые комментарии
+                    created_by = story.get('created_by', {}).get('name', 'Неизвестно')
+                    created_at = story.get('created_at', '')
+                    # Форматируем комментарий с автором и датой
+                    comment = f"[{created_by}, {created_at}] {text}"
+                    comments.append(comment)
+            return comments
+        return []
+    except Exception as e:
+        # Если не удалось загрузить stories, возвращаем пустой список
+        # Не прерываем выполнение из-за ошибки загрузки комментариев
+        return []
+
+
+def load_asana_tasks_via_mcp(mcp_client, include_stories: bool = True) -> List[Dict[str, Any]]:
     """
     Загрузить задачи из проекта Asana через MCP
     
     Args:
         mcp_client: MCP клиент для работы с Asana
+        include_stories: Загружать ли комментарии (stories) для задач
         
     Returns:
-        Список задач из Asana
+        Список задач из Asana с добавленными комментариями в поле 'stories'
     """
     try:
         # Используем MCP инструмент для получения задач проекта
@@ -48,7 +90,7 @@ def load_asana_tasks_via_mcp(mcp_client) -> List[Dict[str, Any]]:
                 "opt_fields": [
                     "name", "notes", "assignee", "assignee.name",
                     "completed", "due_on", "custom_fields",
-                    "created_at", "modified_at"
+                    "created_at", "modified_at", "gid"
                 ]
             }
         )
@@ -57,7 +99,34 @@ def load_asana_tasks_via_mcp(mcp_client) -> List[Dict[str, Any]]:
         successful = result.get('successful') or result.get('successfull', False)
         
         if result and successful:
-            return result.get('data', {}).get('data', [])
+            tasks = result.get('data', {}).get('data', [])
+            
+            # Загружаем комментарии для каждой задачи (если включено)
+            if include_stories:
+                print(f"   📝 Загрузка комментариев для {len(tasks)} задач...")
+                for i, task in enumerate(tasks):
+                    task_gid = task.get('gid')
+                    if task_gid:
+                        stories = load_stories_for_task(mcp_client, task_gid)
+                        if stories:
+                            # Добавляем комментарии в задачу
+                            task['stories'] = stories
+                            # Объединяем комментарии с notes для удобства использования
+                            notes = task.get('notes', '') or ''
+                            if notes:
+                                notes += '\n\n--- Комментарии ---\n'
+                            else:
+                                notes = '--- Комментарии ---\n'
+                            notes += '\n'.join(stories)
+                            task['notes'] = notes
+                        
+                        # Показываем прогресс каждые 10 задач
+                        if (i + 1) % 10 == 0:
+                            print(f"      Загружено комментариев для {i + 1}/{len(tasks)} задач...", end='\r')
+                
+                print(f"      ✅ Загружены комментарии для всех задач")
+            
+            return tasks
         else:
             error = result.get('error', 'Unknown error') if result else 'No response'
             print(f"⚠️  Ошибка загрузки задач из Asana: {error}")
@@ -133,7 +202,8 @@ def create_asana_task_via_mcp(mcp_client, task_data: Dict[str, Any]) -> Optional
 def sync_telegram_to_asana(
     telegram_tasks_file: Path,
     mcp_client=None,
-    dry_run: bool = True
+    dry_run: bool = True,
+    include_stories: bool = True
 ) -> Dict[str, Any]:
     """
     Выполнить синхронизацию задач Telegram → Asana
@@ -142,11 +212,16 @@ def sync_telegram_to_asana(
         telegram_tasks_file: Путь к файлу с задачами из Telegram
         mcp_client: MCP клиент для работы с Asana (опционально)
         dry_run: Если True, только анализирует, не создает/не обновляет
+        include_stories: Загружать ли комментарии (stories) для задач Asana
         
     Returns:
         Отчет о синхронизации
     """
-    sync = AsanaSync()
+    # Инициализируем синхронизатор с новой архитектурой V2
+    sync = AsanaSync(
+        use_time_windows=True,      # Использовать временные окна для фильтрации
+        use_embedding_cache=True    # Использовать кеш эмбеддингов
+    )
     
     print("📥 Загрузка задач из Telegram...")
     telegram_tasks = sync.load_telegram_tasks(telegram_tasks_file)
@@ -155,7 +230,7 @@ def sync_telegram_to_asana(
     asana_tasks = []
     if mcp_client:
         print("\n📥 Загрузка задач из Asana...")
-        asana_tasks = load_asana_tasks_via_mcp(mcp_client)
+        asana_tasks = load_asana_tasks_via_mcp(mcp_client, include_stories=include_stories)
         print(f"   ✓ Загружено {len(asana_tasks)} задач")
     else:
         print("\n⚠️  MCP клиент не предоставлен, пропускаем загрузку из Asana")
@@ -197,9 +272,18 @@ def sync_telegram_to_asana(
             'telegram_tasks': telegram_tasks
         }
     
-    # Сопоставление задач
-    print("\n🔍 Сопоставление задач...")
-    matching = sync.find_matching_tasks(telegram_tasks, asana_tasks)
+    # Сопоставление задач через новую архитектуру V2
+    print("\n🔍 Сопоставление задач (V2: временные окна + кеш эмбеддингов)...")
+    matching = sync.find_matching_tasks_v2(
+        telegram_tasks, 
+        asana_tasks,
+        similarity_threshold=0.75,
+        verbose=True,
+        use_embeddings=True,
+        use_gpt5_verification=False,  # GPT-5 только для потенциальных совпадений
+        low_threshold=0.65,
+        use_two_stage_matching=True
+    )
     
     print(f"   ✓ Найдено совпадений: {len(matching['matches'])}")
     print(f"   ✓ Только в Telegram: {len(matching['telegram_only'])}")

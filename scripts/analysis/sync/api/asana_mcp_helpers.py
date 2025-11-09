@@ -26,7 +26,7 @@ def load_asana_tasks_direct(
     где доступны MCP инструменты напрямую.
     
     Использование в Cursor:
-        from scripts.analysis.sync.asana_mcp_helpers import load_asana_tasks_direct
+        from scripts.analysis.sync.api.asana_mcp_helpers import load_asana_tasks_direct
         
         tasks = load_asana_tasks_direct(
             project_gid="1210655252186716",
