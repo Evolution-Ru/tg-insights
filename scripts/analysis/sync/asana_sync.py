@@ -187,10 +187,15 @@ class AsanaSync:
         else:
             return name
     
-    def calculate_similarity(self, text1: str, text2: str) -> float:
+    def calculate_similarity(self, text1: str, text2: str, verbose: bool = False) -> float:
         """
         Вычисление семантической схожести двух текстов через GPT-5
         Возвращает значение от 0 до 1
+        
+        Args:
+            text1: Первый текст для сравнения
+            text2: Второй текст для сравнения
+            verbose: Выводить предупреждения при ошибках
         """
         if not text1 or not text2:
             return 0.0
@@ -217,6 +222,7 @@ class AsanaSync:
             )
             
             # Извлекаем число из ответа
+            result_text = None
             if hasattr(response, 'output') and response.output:
                 if isinstance(response.output, list) and len(response.output) > 0:
                     output_item = response.output[0]
@@ -250,14 +256,33 @@ class AsanaSync:
             else:
                 result_text = str(response).strip()
             
-            # Ищем число в ответе
-            match = re.search(r'0?\.\d+|1\.0|0|1', result_text)
-            if match:
-                similarity = float(match.group())
-                return min(max(similarity, 0.0), 1.0)
-            return 0.5  # По умолчанию средняя схожесть
+            # Ищем число в ответе (более гибкий паттерн)
+            if result_text:
+                # Пробуем разные форматы чисел
+                match = re.search(r'\b(0?\.\d+|1\.0|0|1)\b', result_text)
+                if not match:
+                    # Пробуем найти любое число от 0 до 1
+                    match = re.search(r'([01]\.?\d*)', result_text)
+                
+                if match:
+                    similarity = float(match.group())
+                    # Нормализуем: если число > 1, делим на 10 (возможно, GPT вернул 0-10)
+                    if similarity > 1.0:
+                        similarity = similarity / 10.0
+                    return min(max(similarity, 0.0), 1.0)
+                else:
+                    # Если не найдено число, используем fallback
+                    if verbose:
+                        print(f"      ⚠️  GPT-5 вернул нечисловой ответ: '{result_text[:100]}', используем fallback")
+                    return self._simple_similarity(text1, text2)
+            else:
+                if verbose:
+                    print(f"      ⚠️  GPT-5 вернул пустой ответ, используем fallback")
+                return self._simple_similarity(text1, text2)
         except Exception as e:
             # Fallback на простое сравнение по ключевым словам
+            if verbose:
+                print(f"      ⚠️  Ошибка GPT-5 проверки: {e}, используем fallback")
             return self._simple_similarity(text1, text2)
     
     def _simple_similarity(self, text1: str, text2: str) -> float:
@@ -320,6 +345,7 @@ class AsanaSync:
             print(f"   📊 Всего задач: {len(telegram_tasks)} Telegram × {len(asana_tasks)} Asana")
         
         # Шаг 1: Создаем эмбеддинги для всех задач Asana (если используем эмбеддинги)
+        quota_exceeded_during_embeddings = False  # Инициализируем переменную перед использованием
         if use_embeddings:
             if verbose:
                 print(f"\n   🔢 Создание эмбеддингов для {len(asana_tasks)} задач Asana...")
@@ -373,38 +399,106 @@ class AsanaSync:
                         for _ in batch_texts:
                             asana_embeddings.append([0.0] * 1536)  # Размерность text-embedding-3-small
                     else:
-                        batch_response = self.openai_client.embeddings.create(
-                            model="text-embedding-3-small",
-                            input=batch_texts_filtered
-                        )
-                        batch_embeddings = [item.embedding for item in batch_response.data]
-                        
-                        # Заполняем эмбеддинги с учетом пустых текстов
-                        embedding_idx = 0
-                        for j in range(len(batch_texts)):
-                            if j in batch_indices:
-                                asana_embeddings.append(batch_embeddings[embedding_idx])
-                                embedding_idx += 1
+                        try:
+                            batch_response = self.openai_client.embeddings.create(
+                                model="text-embedding-3-small",
+                                input=batch_texts_filtered
+                            )
+                            batch_embeddings = [item.embedding for item in batch_response.data]
+                            
+                            # Заполняем эмбеддинги с учетом пустых текстов
+                            embedding_idx = 0
+                            for j in range(len(batch_texts)):
+                                if j in batch_indices:
+                                    asana_embeddings.append(batch_embeddings[embedding_idx])
+                                    embedding_idx += 1
+                                else:
+                                    # Для пустых задач создаем нулевой эмбеддинг
+                                    asana_embeddings.append([0.0] * 1536)
+                        except Exception as e:
+                            error_str = str(e)
+                            error_type = type(e).__name__
+                            # Детальное логирование ошибки
+                            if verbose:
+                                print(f"\n      ⚠️  Ошибка создания эмбеддингов (батч {i//batch_size + 1}):")
+                                print(f"         Тип: {error_type}")
+                                print(f"         Сообщение: {error_str[:200]}")
+                            
+                            # Проверяем на превышение квоты
+                            if '429' in error_str or 'insufficient_quota' in error_str or 'quota' in error_str.lower() or 'rate_limit' in error_str.lower():
+                                if verbose:
+                                    print(f"\n      ❌ ПРЕВЫШЕНА КВОТА OpenAI! Невозможно создать эмбеддинги.")
+                                    print(f"      💡 Решение: пополните баланс OpenAI или используйте предварительную проверку на точные совпадения")
+                                use_embeddings = False
+                                quota_exceeded_during_embeddings = True
+                                break  # Выходим из цикла создания эмбеддингов
                             else:
-                                # Для пустых задач создаем нулевой эмбеддинг
-                                asana_embeddings.append([0.0] * 1536)
+                                if verbose:
+                                    print(f"      ⚠️  Неизвестная ошибка, пробрасываем наверх")
+                                raise  # Пробрасываем другие ошибки наверх
+                    
+                    if quota_exceeded_during_embeddings:
+                        break
                     
                     if verbose:
                         print(f"      ✅ Батч {i//batch_size + 1}/{(len(processed_texts)-1)//batch_size + 1} готов", end='\r', flush=True)
                 
-                if verbose:
+                if verbose and not quota_exceeded_during_embeddings:
                     print(f"\n      ✅ Эмбеддинги для Asana готовы ({len(asana_embeddings)} шт.)")
             except Exception as e:
+                error_str = str(e)
+                error_type = type(e).__name__
+                # Детальное логирование ошибки верхнего уровня
                 if verbose:
-                    print(f"\n      ⚠️  Ошибка создания эмбеддингов: {e}, переключаемся на GPT-5")
+                    print(f"\n      ⚠️  Ошибка создания эмбеддингов (верхний уровень):")
+                    print(f"         Тип: {error_type}")
+                    print(f"         Сообщение: {error_str[:300]}")
                     import traceback
-                    traceback.print_exc()
-                use_embeddings = False
+                    print(f"         Traceback: {traceback.format_exc()[:500]}")
+                
+                # Проверяем на превышение квоты (если ошибка не была обработана внутри цикла)
+                if '429' in error_str or 'insufficient_quota' in error_str or 'quota' in error_str.lower() or 'rate_limit' in error_str.lower():
+                    if verbose:
+                        print(f"\n      ❌ ПРЕВЫШЕНА КВОТА OpenAI! Невозможно создать эмбеддинги.")
+                        print(f"      💡 Решение: пополните баланс OpenAI или используйте предварительную проверку на точные совпадения")
+                    use_embeddings = False
+                    quota_exceeded_during_embeddings = True
+                else:
+                    if verbose:
+                        print(f"\n      ⚠️  Ошибка создания эмбеддингов: {e}, переключаемся на GPT-5")
+                        import traceback
+                        traceback.print_exc()
+                    use_embeddings = False
+        
+        # Проверяем, была ли ошибка квоты
+        quota_exceeded = False
+        if not use_embeddings:
+            # Проверяем, была ли ошибка квоты при создании эмбеддингов
+            if 'quota_exceeded_during_embeddings' in locals() and quota_exceeded_during_embeddings:
+                quota_exceeded = True
+            else:
+                # Пробуем один тестовый запрос к GPT-5 для проверки квоты
+                try:
+                    test_response = self.openai_client.responses.create(
+                        model="gpt-5",
+                        input=[{"role": "user", "content": "test"}],
+                        reasoning={"effort": "low"}
+                    )
+                except Exception as e:
+                    error_str = str(e)
+                    if '429' in error_str or 'insufficient_quota' in error_str or 'quota' in error_str.lower():
+                        quota_exceeded = True
+                        if verbose:
+                            print(f"\n   ❌ ПРЕВЫШЕНА КВОТА OpenAI! Работа невозможна.")
+                            print(f"   💡 Решение: пополните баланс OpenAI")
+                            print(f"   ✅ Используем только предварительную проверку на точные совпадения названий (без API)")
         
         # Шаг 2: Сравниваем каждую задачу из Telegram с задачами Asana
         if verbose:
             print(f"\n   🔍 Поиск совпадений...")
-            if use_embeddings:
+            if quota_exceeded:
+                print(f"      ⚠️  Режим без API: только точные совпадения названий")
+            elif use_embeddings:
                 cost_info = "💰 Дешево (только эмбеддинги)"
                 if use_gpt5_verification:
                     cost_info += " + GPT-5 проверка (дороже)"
@@ -424,6 +518,59 @@ class AsanaSync:
             best_score = 0.0
             best_asana_idx = -1
             
+            # ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА: точное/частичное совпадение названий (быстро и точно!)
+            tg_title_normalized = self.normalize_text(tg_title)
+            exact_match_found = False
+            
+            for idx, asana_task in enumerate(asana_tasks):
+                if idx in asana_matched:
+                    continue
+                
+                asana_name = asana_task.get('name', '')
+                asana_name_normalized = self.normalize_text(asana_name)
+                
+                # Точное совпадение названий
+                if tg_title_normalized == asana_name_normalized:
+                    best_match = asana_task
+                    best_score = 1.0
+                    best_asana_idx = idx
+                    exact_match_found = True
+                    if verbose:
+                        print(f"      ✅ ТОЧНОЕ СОВПАДЕНИЕ НАЗВАНИЙ! Score: 1.00 → {asana_name[:50]}")
+                    break
+                
+                # Частичное совпадение: одно название содержит другое
+                if tg_title_normalized in asana_name_normalized or asana_name_normalized in tg_title_normalized:
+                    # Вычисляем процент совпадения
+                    shorter = min(len(tg_title_normalized), len(asana_name_normalized))
+                    longer = max(len(tg_title_normalized), len(asana_name_normalized))
+                    if shorter > 0:
+                        partial_score = shorter / longer
+                        if partial_score > 0.7:  # Минимум 70% совпадения
+                            if partial_score > best_score:
+                                best_match = asana_task
+                                best_score = partial_score
+                                best_asana_idx = idx
+                                exact_match_found = True
+                                if verbose:
+                                    print(f"      ✅ ЧАСТИЧНОЕ СОВПАДЕНИЕ НАЗВАНИЙ! Score: {partial_score:.2f} → {asana_name[:50]}")
+            
+            # Если нашли точное совпадение, пропускаем эмбеддинги
+            if exact_match_found and best_score >= similarity_threshold:
+                matches.append((tg_task, best_match, best_score))
+                telegram_matched.add(tg_idx - 1)
+                asana_matched.add(best_asana_idx)
+                if verbose:
+                    print(f"      ✅ Найдено совпадение! Score: {best_score:.2f} → {best_match.get('name', '')[:50]}")
+                continue
+            
+            # Если превышена квота, используем только предварительную проверку
+            if quota_exceeded:
+                if verbose and not exact_match_found:
+                    print(f"      ⚠️  Квота превышена, совпадений не найдено (используется только проверка названий)")
+                continue
+            
+            # Если не нашли точное совпадение, используем эмбеддинги
             if use_embeddings:
                 # Быстрый поиск через эмбеддинги (дешево!)
                 try:
@@ -447,11 +594,19 @@ class AsanaSync:
                     candidates.sort(key=lambda x: x[1], reverse=True)
                     
                     if candidates:
-                        best_asana_idx, best_score = candidates[0]
-                        best_match = asana_tasks[best_asana_idx]
+                        candidate_idx, candidate_score = candidates[0]
+                        candidate_task = asana_tasks[candidate_idx]
                         
-                        if verbose:
-                            print(f"      🔢 Лучший кандидат через эмбеддинги: {best_score:.3f} → {best_match.get('name', '')[:50]}")
+                        # Если эмбеддинг дал лучший результат, чем предварительная проверка, используем его
+                        if candidate_score > best_score:
+                            best_asana_idx = candidate_idx
+                            best_score = candidate_score
+                            best_match = candidate_task
+                            
+                            if verbose:
+                                print(f"      🔢 Лучший кандидат через эмбеддинги: {best_score:.3f} → {best_match.get('name', '')[:50]}")
+                        elif verbose and best_score > 0:
+                            print(f"      🔢 Эмбеддинги: {candidate_score:.3f} (уже есть лучшее совпадение: {best_score:.3f})")
                         
                         # Двухэтапное совпадение: если score между low_threshold и similarity_threshold
                         needs_gpt5_check = False
@@ -461,13 +616,13 @@ class AsanaSync:
                                 print(f"         ⚠️  Потенциальное совпадение (score {best_score:.3f} < порога {similarity_threshold}), требуется GPT-5 проверка")
                         
                         # Опциональная финальная проверка через GPT-5
-                        if (use_gpt5_verification and best_score >= similarity_threshold) or needs_gpt5_check:
+                        if best_match and ((use_gpt5_verification and best_score >= similarity_threshold) or needs_gpt5_check):
                             asana_name = best_match.get('name', '')
                             asana_notes = best_match.get('notes', '') or ''
                             asana_text = f"{asana_name} {asana_notes}"
                             
                             try:
-                                gpt5_score = self.calculate_similarity(tg_text, asana_text)
+                                gpt5_score = self.calculate_similarity(tg_text, asana_text, verbose=verbose)
                                 if verbose:
                                     if needs_gpt5_check:
                                         print(f"         🔍 GPT-5 проверка потенциального совпадения: {best_score:.3f} → {gpt5_score:.2f}")
@@ -480,12 +635,17 @@ class AsanaSync:
                                     if verbose and needs_gpt5_check:
                                         print(f"         ✅ GPT-5 подтвердил совпадение!")
                                 else:
-                                    # GPT-5 не подтвердил, сбрасываем
-                                    if verbose and needs_gpt5_check:
-                                        print(f"         ❌ GPT-5 не подтвердил совпадение")
-                                    best_match = None
-                                    best_score = 0.0
-                                    best_asana_idx = -1
+                                    # GPT-5 не подтвердил, но если было точное совпадение названий, оставляем его
+                                    if exact_match_found:
+                                        if verbose:
+                                            print(f"         ⚠️  GPT-5 не подтвердил, но оставляем точное совпадение названий")
+                                    else:
+                                        # GPT-5 не подтвердил и не было точного совпадения, сбрасываем
+                                        if verbose and needs_gpt5_check:
+                                            print(f"         ❌ GPT-5 не подтвердил совпадение")
+                                        best_match = None
+                                        best_score = 0.0
+                                        best_asana_idx = -1
                             except Exception as e:
                                 if verbose:
                                     print(f"         ⚠️  Ошибка GPT-5 проверки: {e}, используем оценку эмбеддингов")
@@ -506,10 +666,13 @@ class AsanaSync:
                         print(f"      ⚠️  Ошибка поиска через эмбеддинги: {e}, переключаемся на GPT-5")
                     use_embeddings = False
             
-            # Fallback: полный перебор через GPT-5 (если эмбеддинги не работают)
-            if not use_embeddings:
+            # Fallback: полный перебор через GPT-5 (если эмбеддинги не работают и квота не превышена)
+            comparisons_done = 0  # Инициализируем переменную перед использованием
+            quota_error_count = 0
+            if not use_embeddings and not quota_exceeded:
                 # Если эмбеддинги отключены, используем GPT-5 для всех сравнений
                 comparisons_done = 0
+                quota_error_count = 0
                 for idx, asana_task in enumerate(asana_tasks):
                     if idx in asana_matched:
                         continue
@@ -523,14 +686,24 @@ class AsanaSync:
                         print(f"      🔍 Сравнение {comparisons_done}/{len(asana_tasks)}...", end='\r', flush=True)
                     
                     try:
-                        score = self.calculate_similarity(tg_text, asana_text)
+                        score = self.calculate_similarity(tg_text, asana_text, verbose=verbose)
                         
                         if score > best_score and score >= similarity_threshold:
                             best_score = score
                             best_match = asana_task
                             best_asana_idx = idx
+                        quota_error_count = 0  # Сбрасываем счетчик при успехе
                     except Exception as e:
-                        if verbose:
+                        error_str = str(e)
+                        if '429' in error_str or 'insufficient_quota' in error_str or 'quota' in error_str.lower():
+                            quota_error_count += 1
+                            if quota_error_count >= 3:  # Если 3 ошибки подряд - останавливаем
+                                if verbose:
+                                    print(f"\n      ❌ Превышена квота OpenAI! Останавливаем сравнения.")
+                                    print(f"      ✅ Используем только найденные точные совпадения названий")
+                                quota_exceeded = True
+                                break
+                        if verbose and quota_error_count == 0:
                             print(f"\n      ⚠️  Ошибка сравнения с задачей '{asana_name[:40]}': {e}")
                         continue
             
