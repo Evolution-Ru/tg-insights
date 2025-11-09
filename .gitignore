@@ -7,6 +7,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.pyc
 
 # Virtual Environment
 .venv/
@@ -15,13 +16,24 @@ env/
 ENV/
 
 # Data
-data/
+accounts/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.session
 
-# Local configs (user-specific)
+# Results and cache (все результаты работы скриптов)
+results/
+farma_compressed_parts/
+*.cache
+cache/
+
+# Batch processing results
+batch_*.json
+batch_metadata.json
+
+# Config (user-specific)
+config/
 local/
 
 # Logs
@@ -50,3 +62,16 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+test_*.json
+test_*.txt
+
+# Old scripts (deprecated - уже перенесены в scripts/batch/)
+scripts/check_batches.py
+scripts/download_batch_results.py
+scripts/process_batch_results.py
+scripts/test_batch_single.py
+scripts/analyze_farma_tasks.py
