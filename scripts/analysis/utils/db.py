@@ -10,7 +10,12 @@ def get_db_connection(db_path: Path) -> sqlite3.Connection:
     """
     Создает подключение к базе данных сообщений.
     """
-    return sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    # Оптимизация для чтения
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=10000")
+    return conn
 
 
 def get_all_messages_from_chats(
@@ -30,12 +35,15 @@ def get_all_messages_from_chats(
         print(f"   📋 {chat_name} ({chat_id})...", end=" ", flush=True)
         
         # Получаем сообщения из чата
+        # Оптимизированный запрос: сначала фильтруем по chat_id и date (используя индекс),
+        # затем применяем TRIM и JOIN только к результатам
         query = """
             SELECT 
                 m.message_id,
                 m.date,
                 m.from_id,
-                COALESCE(NULLIF(TRIM(m.text), ''), NULLIF(TRIM(m.transcript), ''), '') as content,
+                m.text,
+                m.transcript,
                 COALESCE(u.name, m.from_name, 'Неизвестно') as sender_name,
                 m.chat_id,
                 m.chat_name
@@ -43,7 +51,6 @@ def get_all_messages_from_chats(
             LEFT JOIN users u ON u.id = m.from_id
             WHERE m.chat_id = ?
               AND (m.text IS NOT NULL OR m.transcript IS NOT NULL)
-              AND (TRIM(m.text) != '' OR TRIM(m.transcript) != '')
         """
         
         params = [chat_id]
@@ -58,14 +65,23 @@ def get_all_messages_from_chats(
         
         messages = []
         for row in rows:
+            # Применяем TRIM и фильтрацию после получения данных из БД
+            text = row[3] or ""
+            transcript = row[4] or ""
+            content = (text.strip() or transcript.strip() or "")
+            
+            # Пропускаем пустые сообщения
+            if not content:
+                continue
+            
             messages.append({
-                "chat_id": str(row[5]),
+                "chat_id": str(row[6]),
                 "chat_name": chat_name,
                 "message_id": row[0],
                 "date": row[1],
                 "from_id": row[2],
-                "content": row[3] or "",
-                "sender_name": row[4] or "Неизвестно"
+                "content": content,
+                "sender_name": row[5] or "Неизвестно"
             })
         
         # Если был DESC, переворачиваем для хронологического порядка
