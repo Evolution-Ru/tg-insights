@@ -67,6 +67,126 @@ class AsanaSync:
         text = re.sub(r'\s+', ' ', text)
         return text
     
+    def extract_asana_task_context(self, asana_task: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Извлечь контекстную выжимку из задачи Asana
+        
+        Args:
+            asana_task: Задача из Asana
+            
+        Returns:
+            Словарь с контекстной информацией:
+            - summary: краткая выжимка (название + ключевые моменты из notes)
+            - full_text: полный текст для сравнения
+            - key_points: ключевые моменты из описания
+            - status: статус задачи
+            - implementation_details: детали реализации (если есть в notes)
+        """
+        name = asana_task.get('name', '')
+        notes = asana_task.get('notes', '') or ''
+        completed = asana_task.get('completed', False)
+        
+        # Формируем полный текст для сравнения
+        full_text = f"{name} {notes}".strip()
+        
+        # Извлекаем ключевые моменты из notes
+        key_points = []
+        implementation_details = []
+        
+        if notes:
+            # Ищем маркеры реализации
+            lines = notes.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Ключевые слова, указывающие на реализацию
+                if any(marker in line.lower() for marker in ['реализовано', 'сделано', 'готово', 'выполнено', 
+                                                             'работает', 'внедрено', 'завершено', 'done', 'completed']):
+                    implementation_details.append(line)
+                elif len(line) > 20:  # Значимые строки
+                    key_points.append(line[:200])  # Ограничиваем длину
+        
+        # Создаем краткую выжимку
+        summary_parts = [name]
+        if notes:
+            # Берем первые 300 символов из notes как краткое описание
+            notes_preview = notes[:300].strip()
+            if len(notes) > 300:
+                notes_preview += "..."
+            summary_parts.append(notes_preview)
+        
+        summary = "\n".join(summary_parts)
+        
+        return {
+            'summary': summary,
+            'full_text': full_text,
+            'key_points': key_points[:5],  # Максимум 5 ключевых моментов
+            'status': 'completed' if completed else 'in_progress',
+            'implementation_details': implementation_details,
+            'has_notes': bool(notes),
+            'notes_length': len(notes)
+        }
+    
+    def create_asana_task_summary(self, asana_task: Dict[str, Any], use_gpt5: bool = False) -> str:
+        """
+        Создать краткую выжимку задачи Asana для анализа покрытия
+        
+        Args:
+            asana_task: Задача из Asana
+            use_gpt5: Использовать GPT-5 для создания выжимки (дорого, но точнее)
+            
+        Returns:
+            Краткая выжимка задачи
+        """
+        name = asana_task.get('name', '')
+        notes = asana_task.get('notes', '') or ''
+        
+        if use_gpt5 and notes:
+            # Используем GPT-5 для создания структурированной выжимки
+            prompt = f"""Создай краткую выжимку задачи из Asana, выделив:
+1. Что реализовано/сделано
+2. Что планируется/в процессе
+3. Ключевые технические детали
+
+Название задачи: {name}
+
+Описание:
+{notes[:2000]}
+
+Выжимка (кратко, структурированно):"""
+            
+            try:
+                response = self.openai_client.responses.create(
+                    model="gpt-5",
+                    input=[{"role": "user", "content": prompt}],
+                    reasoning={"effort": "low"}
+                )
+                
+                # Извлекаем текст из ответа
+                if hasattr(response, 'output') and response.output:
+                    if isinstance(response.output, list) and len(response.output) > 0:
+                        output_item = response.output[0]
+                        if hasattr(output_item, 'content') and output_item.content:
+                            if isinstance(output_item.content, list) and len(output_item.content) > 0:
+                                content_item = output_item.content[0]
+                                if hasattr(content_item, 'text'):
+                                    return f"{name}\n\n{content_item.text.strip()}"
+            except Exception as e:
+                # Fallback на простую выжимку
+                pass
+        
+        # Простая выжимка без GPT-5
+        if notes:
+            # Берем первые 500 символов
+            notes_preview = notes[:500].strip()
+            if len(notes) > 500:
+                notes_preview += "..."
+            return f"{name}\n\n{notes_preview}"
+        else:
+            return name
+    
     def calculate_similarity(self, text1: str, text2: str) -> float:
         """
         Вычисление семантической схожести двух текстов через GPT-5
@@ -161,7 +281,9 @@ class AsanaSync:
         verbose: bool = True,
         max_asana_tasks: Optional[int] = None,
         use_embeddings: bool = True,
-        use_gpt5_verification: bool = False  # Опциональная финальная проверка через GPT-5 (дорого!)
+        use_gpt5_verification: bool = False,  # Опциональная финальная проверка через GPT-5 (дорого!)
+        low_threshold: float = 0.65,  # Низкий порог для потенциальных совпадений
+        use_two_stage_matching: bool = True  # Двухэтапное совпадение: низкий порог + GPT-5 проверка
     ) -> Dict[str, List[Tuple[Dict, Dict, float]]]:
         """
         Найти совпадения между задачами из Telegram и Asana
@@ -174,6 +296,9 @@ class AsanaSync:
             max_asana_tasks: Максимальное количество задач Asana для сравнения (для теста)
             use_embeddings: Использовать эмбеддинги для быстрого поиска (рекомендуется)
             use_gpt5_verification: Использовать GPT-5 для финальной проверки топ-кандидатов (дорого!)
+            low_threshold: Низкий порог для потенциальных совпадений (по умолчанию 0.65)
+            use_two_stage_matching: Двухэтапное совпадение - если score между low_threshold и similarity_threshold, 
+                                   отправляется на GPT-5 проверку (по умолчанию True)
         
         Returns:
             Dict с ключами:
@@ -201,10 +326,15 @@ class AsanaSync:
             
             asana_embeddings = []
             asana_texts = []
+            asana_contexts = []  # Сохраняем контекстные выжимки для анализа
+            
             for idx, asana_task in enumerate(asana_tasks):
-                asana_name = asana_task.get('name', '')
-                asana_notes = asana_task.get('notes', '') or ''
-                asana_text = f"{asana_name} {asana_notes}".strip()[:8000]
+                # Извлекаем контекстную выжимку
+                context = self.extract_asana_task_context(asana_task)
+                asana_contexts.append(context)
+                
+                # Используем полный текст для эмбеддингов (улучшенное сравнение)
+                asana_text = context['full_text'][:8000]
                 asana_texts.append(asana_text)
                 
                 if verbose and (idx + 1) % 20 == 0:
@@ -215,25 +345,60 @@ class AsanaSync:
                 if verbose:
                     print(f"      🔄 Получение эмбеддингов через API...")
                 
+                # Проверяем, что все тексты валидны (не пустые)
+                # Для пустых текстов используем минимальную заглушку
+                processed_texts = []
+                for text in asana_texts:
+                    if text and text.strip():
+                        processed_texts.append(text[:8000])  # Ограничиваем длину
+                    else:
+                        # Для пустых задач используем минимальную заглушку
+                        processed_texts.append("empty")
+                
                 # OpenAI embeddings API поддерживает батчи до 2048 элементов
                 batch_size = 100
-                for i in range(0, len(asana_texts), batch_size):
-                    batch_texts = asana_texts[i:i+batch_size]
-                    batch_response = self.openai_client.embeddings.create(
-                        model="text-embedding-3-small",
-                        input=batch_texts
-                    )
-                    batch_embeddings = [item.embedding for item in batch_response.data]
-                    asana_embeddings.extend(batch_embeddings)
+                for i in range(0, len(processed_texts), batch_size):
+                    batch_texts = processed_texts[i:i+batch_size]
+                    
+                    # Фильтруем пустые строки перед отправкой в API
+                    batch_texts_filtered = []
+                    batch_indices = []  # Индексы валидных текстов в батче
+                    for j, text in enumerate(batch_texts):
+                        if text and text.strip() and text != "empty":
+                            batch_texts_filtered.append(text)
+                            batch_indices.append(j)
+                    
+                    if not batch_texts_filtered:
+                        # Если весь батч пустой, добавляем нулевые эмбеддинги
+                        for _ in batch_texts:
+                            asana_embeddings.append([0.0] * 1536)  # Размерность text-embedding-3-small
+                    else:
+                        batch_response = self.openai_client.embeddings.create(
+                            model="text-embedding-3-small",
+                            input=batch_texts_filtered
+                        )
+                        batch_embeddings = [item.embedding for item in batch_response.data]
+                        
+                        # Заполняем эмбеддинги с учетом пустых текстов
+                        embedding_idx = 0
+                        for j in range(len(batch_texts)):
+                            if j in batch_indices:
+                                asana_embeddings.append(batch_embeddings[embedding_idx])
+                                embedding_idx += 1
+                            else:
+                                # Для пустых задач создаем нулевой эмбеддинг
+                                asana_embeddings.append([0.0] * 1536)
                     
                     if verbose:
-                        print(f"      ✅ Батч {i//batch_size + 1}/{(len(asana_texts)-1)//batch_size + 1} готов", end='\r', flush=True)
+                        print(f"      ✅ Батч {i//batch_size + 1}/{(len(processed_texts)-1)//batch_size + 1} готов", end='\r', flush=True)
                 
                 if verbose:
                     print(f"\n      ✅ Эмбеддинги для Asana готовы ({len(asana_embeddings)} шт.)")
             except Exception as e:
                 if verbose:
                     print(f"\n      ⚠️  Ошибка создания эмбеддингов: {e}, переключаемся на GPT-5")
+                    import traceback
+                    traceback.print_exc()
                 use_embeddings = False
         
         # Шаг 2: Сравниваем каждую задачу из Telegram с задачами Asana
@@ -288,8 +453,15 @@ class AsanaSync:
                         if verbose:
                             print(f"      🔢 Лучший кандидат через эмбеддинги: {best_score:.3f} → {best_match.get('name', '')[:50]}")
                         
-                        # Опциональная финальная проверка через GPT-5 (если включена)
-                        if use_gpt5_verification and best_score >= similarity_threshold:
+                        # Двухэтапное совпадение: если score между low_threshold и similarity_threshold
+                        needs_gpt5_check = False
+                        if use_two_stage_matching and low_threshold <= best_score < similarity_threshold:
+                            needs_gpt5_check = True
+                            if verbose:
+                                print(f"         ⚠️  Потенциальное совпадение (score {best_score:.3f} < порога {similarity_threshold}), требуется GPT-5 проверка")
+                        
+                        # Опциональная финальная проверка через GPT-5
+                        if (use_gpt5_verification and best_score >= similarity_threshold) or needs_gpt5_check:
                             asana_name = best_match.get('name', '')
                             asana_notes = best_match.get('notes', '') or ''
                             asana_text = f"{asana_name} {asana_notes}"
@@ -297,19 +469,31 @@ class AsanaSync:
                             try:
                                 gpt5_score = self.calculate_similarity(tg_text, asana_text)
                                 if verbose:
-                                    print(f"         🔍 GPT-5 проверка: {best_score:.3f} → {gpt5_score:.2f}")
+                                    if needs_gpt5_check:
+                                        print(f"         🔍 GPT-5 проверка потенциального совпадения: {best_score:.3f} → {gpt5_score:.2f}")
+                                    else:
+                                        print(f"         🔍 GPT-5 проверка: {best_score:.3f} → {gpt5_score:.2f}")
                                 
                                 # Используем GPT-5 оценку если она выше порога
                                 if gpt5_score >= similarity_threshold:
                                     best_score = gpt5_score
+                                    if verbose and needs_gpt5_check:
+                                        print(f"         ✅ GPT-5 подтвердил совпадение!")
                                 else:
                                     # GPT-5 не подтвердил, сбрасываем
+                                    if verbose and needs_gpt5_check:
+                                        print(f"         ❌ GPT-5 не подтвердил совпадение")
                                     best_match = None
                                     best_score = 0.0
                                     best_asana_idx = -1
                             except Exception as e:
                                 if verbose:
                                     print(f"         ⚠️  Ошибка GPT-5 проверки: {e}, используем оценку эмбеддингов")
+                                # Если была проверка потенциального совпадения и GPT-5 упал, сбрасываем
+                                if needs_gpt5_check:
+                                    best_match = None
+                                    best_score = 0.0
+                                    best_asana_idx = -1
                     
                     # Проверяем порог схожести
                     if best_score < similarity_threshold:
@@ -372,11 +556,69 @@ class AsanaSync:
             if idx not in asana_matched
         ]
         
+        # Анализ покрытия: что реализовано в Asana из задач Telegram
+        coverage_analysis = self._analyze_coverage(matches, telegram_tasks, asana_tasks)
+        
         return {
             'matches': matches,
             'telegram_only': telegram_only,
-            'asana_only': asana_only
+            'asana_only': asana_only,
+            'coverage': coverage_analysis
         }
+    
+    def _analyze_coverage(
+        self,
+        matches: List[Tuple[Dict, Dict, float]],
+        telegram_tasks: List[Dict[str, Any]],
+        asana_tasks: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Анализ покрытия: что из Telegram уже реализовано в Asana
+        
+        Returns:
+            Словарь с анализом покрытия
+        """
+        coverage = {
+            'total_telegram_tasks': len(telegram_tasks),
+            'covered_tasks': len(matches),
+            'coverage_percentage': (len(matches) / len(telegram_tasks) * 100) if telegram_tasks else 0,
+            'implementation_status': {
+                'completed_in_asana': 0,
+                'in_progress_in_asana': 0,
+                'not_started_in_asana': 0
+            },
+            'detailed_matches': []
+        }
+        
+        for tg_task, asana_task, score in matches:
+            asana_completed = asana_task.get('completed', False)
+            tg_status = tg_task.get('status', '')
+            
+            # Определяем статус реализации
+            if asana_completed:
+                status = 'completed_in_asana'
+                coverage['implementation_status']['completed_in_asana'] += 1
+            elif tg_status == 'в процессе' or not asana_completed:
+                status = 'in_progress_in_asana'
+                coverage['implementation_status']['in_progress_in_asana'] += 1
+            else:
+                status = 'not_started_in_asana'
+                coverage['implementation_status']['not_started_in_asana'] += 1
+            
+            # Извлекаем контекст Asana для анализа
+            asana_context = self.extract_asana_task_context(asana_task)
+            
+            coverage['detailed_matches'].append({
+                'telegram_title': tg_task.get('title', ''),
+                'asana_name': asana_task.get('name', ''),
+                'similarity_score': score,
+                'implementation_status': status,
+                'asana_summary': asana_context['summary'][:300],
+                'has_implementation_details': len(asana_context['implementation_details']) > 0,
+                'asana_has_notes': asana_context['has_notes']
+            })
+        
+        return coverage
     
     def enrich_asana_task_with_telegram(
         self, 
@@ -501,7 +743,9 @@ class AsanaSync:
         matching_result: Dict[str, List],
         output_file: Path
     ):
-        """Генерировать отчет о синхронизации"""
+        """Генерировать отчет о синхронизации с анализом покрытия"""
+        coverage = matching_result.get('coverage', {})
+        
         report = {
             'timestamp': datetime.now().isoformat(),
             'summary': {
@@ -509,8 +753,10 @@ class AsanaSync:
                 'total_asana_tasks': len(matching_result['matches']) + len(matching_result['asana_only']),
                 'matched_tasks': len(matching_result['matches']),
                 'telegram_only': len(matching_result['telegram_only']),
-                'asana_only': len(matching_result['asana_only'])
+                'asana_only': len(matching_result['asana_only']),
+                'coverage_percentage': coverage.get('coverage_percentage', 0)
             },
+            'coverage_analysis': coverage,
             'matches': [
                 {
                     'telegram_task': match[0],
@@ -520,7 +766,8 @@ class AsanaSync:
                         'notes': match[1].get('notes', '')[:200] + '...' if len(match[1].get('notes', '')) > 200 else match[1].get('notes', '')
                     },
                     'similarity_score': match[2],
-                    'recommended_updates': self.enrich_asana_task_with_telegram(match[1], match[0])
+                    'recommended_updates': self.enrich_asana_task_with_telegram(match[1], match[0]),
+                    'asana_context': self.extract_asana_task_context(match[1])  # Добавляем контекстную выжимку
                 }
                 for match in matching_result['matches']
             ],

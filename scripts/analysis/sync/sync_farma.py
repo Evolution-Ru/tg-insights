@@ -16,6 +16,12 @@ if str(_project_root) not in sys.path:
 
 from scripts.analysis.sync.asana_sync import AsanaSync
 
+# Импортируем простой клиент для прямых вызовов MCP
+try:
+    from scripts.analysis.sync.direct_mcp import create_direct_mcp_client
+except ImportError:
+    create_direct_mcp_client = None
+
 
 # Конфигурация
 ASANA_PROJECT_GID = "1210655252186716"  # Фарма+
@@ -47,10 +53,14 @@ def load_asana_tasks_via_mcp(mcp_client) -> List[Dict[str, Any]]:
             }
         )
         
-        if result and result.get('successful'):
+        # Обрабатываем ответ Composio (может быть "successfull" или "successful")
+        successful = result.get('successful') or result.get('successfull', False)
+        
+        if result and successful:
             return result.get('data', {}).get('data', [])
         else:
-            print(f"⚠️  Ошибка загрузки задач из Asana: {result.get('error', 'Unknown error')}")
+            error = result.get('error', 'Unknown error') if result else 'No response'
+            print(f"⚠️  Ошибка загрузки задач из Asana: {error}")
             return []
     except Exception as e:
         print(f"❌ Исключение при загрузке задач из Asana: {e}")
@@ -77,7 +87,10 @@ def update_asana_task_via_mcp(mcp_client, task_gid: str, updates: Dict[str, Any]
                 "data": updates
             }
         )
-        return result and result.get('successful', False)
+        # Обрабатываем ответ Composio (может быть "successfull" или "successful")
+        if not result:
+            return False
+        return result.get('successful') or result.get('successfull', False)
     except Exception as e:
         print(f"❌ Ошибка обновления задачи {task_gid}: {e}")
         return False
@@ -102,11 +115,15 @@ def create_asana_task_via_mcp(mcp_client, task_data: Dict[str, Any]) -> Optional
             }
         )
         
-        if result and result.get('successful'):
+        # Обрабатываем ответ Composio (может быть "successfull" или "successful")
+        successful = result and (result.get('successful') or result.get('successfull', False))
+        
+        if successful:
             task = result.get('data', {}).get('data', {})
             return task.get('gid')
         else:
-            print(f"⚠️  Ошибка создания задачи: {result.get('error', 'Unknown error')}")
+            error = result.get('error', 'Unknown error') if result else 'No response'
+            print(f"⚠️  Ошибка создания задачи: {error}")
             return None
     except Exception as e:
         print(f"❌ Ошибка создания задачи: {e}")
@@ -239,9 +256,16 @@ def main():
         print(f"❌ Файл не найден: {telegram_tasks_file}")
         return
     
-    # Проверяем наличие MCP клиента
-    # В реальном использовании MCP клиент должен быть передан извне
-    mcp_client = None  # TODO: получить MCP клиент
+    # Создаем MCP клиент для прямых вызовов через Cursor
+    # В контексте Cursor MCP инструменты доступны напрямую через функции типа:
+    # mcp_mcp-config-el8wcq_ASANA_GET_TASKS_FROM_A_PROJECT()
+    mcp_client = None
+    
+    # Пробуем создать простой клиент
+    if create_direct_mcp_client:
+        # В контексте Cursor можно использовать прямые вызовы MCP инструментов
+        # Клиент нужен только для единообразного интерфейса
+        mcp_client = create_direct_mcp_client()
     
     print("🚀 Синхронизация Telegram ↔ Asana")
     print("=" * 60)
