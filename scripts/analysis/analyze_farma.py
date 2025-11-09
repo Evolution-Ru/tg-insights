@@ -23,7 +23,7 @@ from .utils.gpt5_client import get_openai_client
 
 # Конфигурация
 script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parent  # tg-analyz/
+project_root = script_dir.parent.parent  # tg-analyz/ (scripts/analysis/ -> scripts/ -> tg-analyz/)
 DB_PATH = project_root / "accounts" / "ychukaev" / "messages.sqlite"
 
 # ID чатов для анализа
